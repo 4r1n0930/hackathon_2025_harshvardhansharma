@@ -1,16 +1,12 @@
-<<<<<<< HEAD
 """
 Gap2Growth Configuration Module
 """
 
-=======
->>>>>>> 8feacbf6adc2f63a8f778ae9cd2d236f7e181b12
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-<<<<<<< HEAD
 
 class Config:
     """Base configuration class"""
@@ -67,10 +63,3 @@ def get_config():
     """Get the appropriate configuration based on environment"""
     env = os.getenv('FLASK_ENV', 'development')
     return config_options.get(env, DevelopmentConfig)
-=======
-class Config:
-    SECRET_KEY = os.getenv("SECRET_KEY")
-    SUPABASE_URL = os.getenv("SUPABASE_URL")
-    SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-    FIREBASE_CREDENTIALS = os.getenv("FIREBASE_CREDENTIALS")
->>>>>>> 8feacbf6adc2f63a8f778ae9cd2d236f7e181b12

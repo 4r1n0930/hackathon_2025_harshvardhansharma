@@ -1,7 +1,12 @@
-<<<<<<< HEAD
-/* Gap2Growth - Main JavaScript */
+/* ============================================================================
+   Gap2Growth - Main JavaScript
+   ============================================================================ */
 
+// ========== DOM CONTENT LOADED ==========
 document.addEventListener('DOMContentLoaded', function () {
+    console.log('Gap2Growth - Application Loaded');
+
+    // Auto-dismiss alerts after 5 seconds (except persistent ones)
     const alerts = document.querySelectorAll('.alert:not(.persistent)');
     alerts.forEach(alert => {
         setTimeout(() => {
@@ -11,12 +16,14 @@ document.addEventListener('DOMContentLoaded', function () {
         }, 5000);
     });
 
+    // Staggered card animation
     const cards = document.querySelectorAll('.card, .stat-card, .activity-card');
     cards.forEach((card, index) => {
         card.style.animationDelay = `${index * 0.05}s`;
         card.classList.add('fade-in');
     });
 
+    // Form select state handler
     document.querySelectorAll('.form-select').forEach(select => {
         select.addEventListener('change', function () {
             if (this.value) {
@@ -26,9 +33,15 @@ document.addEventListener('DOMContentLoaded', function () {
             }
         });
     });
+
+    // Initialize notification polling if container or badge is present
+    if (typeof notifications !== 'undefined' && notifications.init) {
+        notifications.init();
+    }
 });
 
 
+// ========== API CLIENT ==========
 const api = {
     async get(url) {
         try {
@@ -58,7 +71,99 @@ const api = {
 };
 
 
-// Mark a notification as read
+// ========== NOTIFICATIONS SERVICE ==========
+const notifications = {
+    items: [],
+    count: 0,
+    badge: null,
+    container: null,
+
+    init() {
+        this.badge = document.getElementById('notification-badge');
+        this.container = document.getElementById('notification-list');
+        if (this.badge || this.container) {
+            this.fetch();
+            this.startPolling();
+        }
+    },
+
+    async fetch() {
+        try {
+            const data = await api.get('/api/notifications');
+            this.items = data.notifications || [];
+            this.count = data.unread_count || 0;
+            this.updateBadge();
+            this.render();
+        } catch (error) {
+            console.error('Failed to fetch notifications:', error);
+        }
+    },
+
+    updateBadge() {
+        if (!this.badge) return;
+        if (this.count > 0) {
+            this.badge.textContent = this.count > 99 ? '99+' : this.count;
+            this.badge.style.display = 'flex';
+        } else {
+            this.badge.style.display = 'none';
+        }
+    },
+
+    render() {
+        if (!this.container) return;
+        if (this.items.length === 0) {
+            this.container.innerHTML = '<div class="empty-state">No notifications</div>';
+            return;
+        }
+        this.container.innerHTML = this.items.slice(0, 5).map(n => `
+            <div class="notification-item ${n.is_read ? '' : 'unread'}" data-id="${n.id}">
+                <div class="notification-icon ${n.type || 'info'}">
+                    <i class="bi bi-${this.getIcon(n.type)}"></i>
+                </div>
+                <div class="notification-content">
+                    <div class="notification-title">${escapeHtml(n.title)}</div>
+                    <div class="notification-message">${escapeHtml(n.message)}</div>
+                    <div class="notification-time">${formatTime(n.created_at)}</div>
+                </div>
+            </div>
+        `).join('');
+
+        this.container.querySelectorAll('.notification-item.unread').forEach(item => {
+            item.addEventListener('click', () => this.markAsRead(item.dataset.id));
+        });
+    },
+
+    getIcon(type) {
+        const icons = {
+            free_time: 'clock',
+            recommendation: 'lightbulb',
+            cancellation: 'x-circle',
+            announcement: 'megaphone',
+            reminder: 'bell',
+            info: 'info-circle'
+        };
+        return icons[type] || 'info-circle';
+    },
+
+    async markAsRead(id) {
+        try {
+            await api.post(`/api/notifications/${id}/read`);
+            const item = this.items.find(n => n.id === id);
+            if (item) item.is_read = true;
+            this.count = Math.max(0, this.count - 1);
+            this.updateBadge();
+            this.render();
+        } catch (error) {
+            console.error('Failed to mark notification as read:', error);
+        }
+    },
+
+    startPolling() {
+        setInterval(() => this.fetch(), 30000);
+    }
+};
+
+// Mark a single notification as read
 function markNotificationRead(notificationId) {
     api.post(`/student/notifications/${notificationId}/read`)
         .then(() => {
@@ -68,6 +173,7 @@ function markNotificationRead(notificationId) {
         .catch(err => console.error('Failed to mark notification as read:', err));
 }
 
+// Mark all notifications as read
 function markAllNotificationsRead() {
     api.post('/api/notifications/read-all')
         .then(() => {
@@ -79,14 +185,13 @@ function markAllNotificationsRead() {
 }
 
 
-// Start an activity
+// ========== STUDENT ACTIVITY TRACKING ==========
 function startActivity(activityId) {
     api.post(`/student/activity/${activityId}/start`)
         .then(data => {
             if (data.success) {
                 showToast('Activity started! Good luck!', 'success');
                 sessionStorage.setItem('currentActivityLog', data.log_id);
-                // Refresh the page to show updated status
                 setTimeout(() => location.reload(), 1500);
             }
         })
@@ -112,31 +217,31 @@ function completeActivity(logId) {
 }
 
 
-// Show toast notification
+// ========== TOAST NOTIFICATIONS ==========
 function showToast(message, type = 'info') {
-    let container = document.querySelector('.toast-container');
+    let container = document.querySelector('.toast-container') || document.getElementById('toast-container');
     if (!container) {
         container = document.createElement('div');
         container.className = 'toast-container';
+        container.id = 'toast-container';
         container.style.cssText = 'position: fixed; top: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 10px;';
         document.body.appendChild(container);
     }
 
-
     const toast = document.createElement('div');
     toast.className = `toast-message toast-${type}`;
-
 
     const icons = {
         success: '✅',
         danger: '❌',
+        error: '❌',
         warning: '⚠️',
         info: 'ℹ️'
     };
 
     toast.innerHTML = `
         <span class="toast-icon">${icons[type] || icons.info}</span>
-        <span class="toast-text">${message}</span>
+        <span class="toast-text">${escapeHtml(message)}</span>
         <button class="toast-close" onclick="this.parentElement.remove()">×</button>
     `;
 
@@ -150,11 +255,10 @@ function showToast(message, type = 'info') {
         box-shadow: 0 4px 20px rgba(0,0,0,0.15);
         font-size: 14px;
         animation: slideIn 0.3s ease;
-        border-left: 4px solid ${type === 'success' ? '#10b981' : type === 'danger' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
+        border-left: 4px solid ${type === 'success' ? '#10b981' : type === 'danger' || type === 'error' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#3b82f6'};
     `;
 
     container.appendChild(toast);
-
 
     setTimeout(() => {
         toast.style.animation = 'slideOut 0.3s ease forwards';
@@ -162,8 +266,7 @@ function showToast(message, type = 'info') {
     }, 5000);
 }
 
-
-// Initialize toast styles
+// Inject animation styles if not already present
 if (!document.querySelector('#toast-styles')) {
     const style = document.createElement('style');
     style.id = 'toast-styles';
@@ -175,6 +278,10 @@ if (!document.querySelector('#toast-styles')) {
         @keyframes slideOut {
             from { transform: translateX(0); opacity: 1; }
             to { transform: translateX(100%); opacity: 0; }
+        }
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
         }
         .toast-close {
             background: none;
@@ -191,101 +298,47 @@ if (!document.querySelector('#toast-styles')) {
 }
 
 
-// Format time string
+// ========== UTILITY FUNCTIONS ==========
+
+/**
+ * Format time string in 12-hour format
+ * @param {string} timeString - Time in 24-hour format (HH:MM)
+ * @returns {string} Time in 12-hour format
+ */
 function formatTime(timeString) {
     if (!timeString) return '';
     const [hours, minutes] = timeString.split(':');
-=======
-
-// ========== UTILITY FUNCTIONS ==========
-// These are helper functions used throughout the app
-
-/**
- * Show a toast notification message
- * @param {string} message - The message to display
- * @param {string} type - Type of toast: 'success', 'error', 'warning', 'info'
- */
-function showToast(message, type = 'info') {
-    // Create toast container if it doesn't exist
-    let container = document.getElementById('toast-container');
-    if (!container) {
-        container = document.createElement('div');
-        container.id = 'toast-container';
-        container.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 9999;
-        `;
-        document.body.appendChild(container);
-    }
-
-    // Create the toast element
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.style.cssText = `
-        background: ${type === 'success' ? '#06d6a0' : type === 'error' ? '#ef476f' : type === 'warning' ? '#ffd166' : '#4361ee'};
-        color: ${type === 'warning' ? '#1a1a2e' : 'white'};
-        padding: 1rem 1.5rem;
-        border-radius: 8px;
-        margin-bottom: 10px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        animation: slideIn 0.3s ease;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-    `;
-
-    // Add icon based on type
-    const icons = {
-        success: '<i class="bi bi-check-circle-fill"></i>',
-        error: '<i class="bi bi-x-circle-fill"></i>',
-        warning: '<i class="bi bi-exclamation-triangle-fill"></i>',
-        info: '<i class="bi bi-info-circle-fill"></i>'
-    };
-
-    toast.innerHTML = `${icons[type] || ''} <span>${message}</span>`;
-    container.appendChild(toast);
-
-    // Remove toast after 3 seconds
-    setTimeout(() => {
-        toast.style.animation = 'fadeOut 0.3s ease';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
-/**
- * Format a date object to a readable string
- * @param {Date} date - The date to format
- * @returns {string} Formatted date string
- */
-function formatDate(date) {
-    const options = {
-        weekday: 'short',
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-    };
-    return date.toLocaleDateString('en-IN', options);
-}
-
-/**
- * Format time in 12-hour format
- * @param {string} time24 - Time in 24-hour format (HH:MM)
- * @returns {string} Time in 12-hour format
- */
-function formatTime(time24) {
-    const [hours, minutes] = time24.split(':');
->>>>>>> 8feacbf6adc2f63a8f778ae9cd2d236f7e181b12
     const hour = parseInt(hours);
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const hour12 = hour % 12 || 12;
     return `${hour12}:${minutes} ${ampm}`;
 }
 
-<<<<<<< HEAD
+/**
+ * Format a date object or string into a readable format
+ * @param {Date|string} date - Date to format
+ * @param {string} format - 'short', 'medium', 'long'
+ * @returns {string} Formatted date string
+ */
+function formatDate(date, format = 'medium') {
+    if (!date) return '';
+    const d = new Date(date);
+    if (isNaN(d.getTime())) return 'Invalid Date';
 
-// Format duration in minutes
+    const options = {
+        short: { month: 'numeric', day: 'numeric' },
+        medium: { month: 'short', day: 'numeric', year: 'numeric' },
+        long: { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }
+    };
+
+    return d.toLocaleDateString('en-US', options[format] || options.medium);
+}
+
+/**
+ * Format duration in minutes into readable text
+ * @param {number} minutes
+ * @returns {string}
+ */
 function formatDuration(minutes) {
     if (!minutes || minutes <= 0) return '0 mins';
     if (minutes < 60) return `${minutes} mins`;
@@ -294,61 +347,33 @@ function formatDuration(minutes) {
     return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
+/**
+ * Calculate duration between two times
+ * @param {string} start - Start time (HH:MM)
+ * @param {string} end - End time (HH:MM)
+ * @returns {string} Duration in human-readable format
+ */
+function calculateDuration(start, end) {
+    if (!start || !end) return '';
+    const [startH, startM] = start.split(':').map(Number);
+    const [endH, endM] = end.split(':').map(Number);
 
-// Show confirmation dialog
-function confirmAction(message, callback) {
-    if (confirm(message)) {
-        callback();
-    }
+    let totalMinutes = (endH * 60 + endM) - (startH * 60 + startM);
+    if (totalMinutes < 0) totalMinutes += 24 * 60; // Handle overnight
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours === 0) return `${minutes} min`;
+    if (minutes === 0) return `${hours} hr`;
+    return `${hours} hr ${minutes} min`;
 }
 
-
-// Delete item with confirmation
-function deleteItem(url, itemName) {
-    confirmAction(`Are you sure you want to delete ${itemName}?`, () => {
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = url;
-        document.body.appendChild(form);
-        form.submit();
-    });
-}
-
-
-// Debounce function
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-
-// Initialize table search
-function initializeTableSearch(searchInputId, tableId) {
-    const searchInput = document.getElementById(searchInputId);
-    const table = document.getElementById(tableId);
-
-    if (!searchInput || !table) return;
-
-    searchInput.addEventListener('input', debounce(function (e) {
-        const query = e.target.value.toLowerCase();
-        const rows = table.querySelectorAll('tbody tr');
-
-        rows.forEach(row => {
-            const text = row.textContent.toLowerCase();
-            row.style.display = text.includes(query) ? '' : 'none';
-        });
-    }, 200));
-}
-
-
-// Format relative time
+/**
+ * Format relative time (e.g. "5 mins ago")
+ * @param {string} dateString
+ * @returns {string}
+ */
 function formatRelativeTime(dateString) {
     if (!dateString) return 'Just now';
 
@@ -367,82 +392,95 @@ function formatRelativeTime(dateString) {
     return date.toLocaleDateString();
 }
 
-
-window.gap2growth = {
-    api,
-    showToast,
-    formatTime,
-    formatDuration,
-    formatRelativeTime,
-    confirmAction,
-    debounce,
-    startActivity,
-    completeActivity,
-    markNotificationRead,
-    markAllNotificationsRead
-};
-=======
 /**
- * Calculate duration between two times
- * @param {string} start - Start time (HH:MM)
- * @param {string} end - End time (HH:MM)
- * @returns {string} Duration in human-readable format
+ * Debounce a function to limit execution rate
+ * @param {Function} func
+ * @param {number} wait
+ * @returns {Function}
  */
-function calculateDuration(start, end) {
-    const [startH, startM] = start.split(':').map(Number);
-    const [endH, endM] = end.split(':').map(Number);
-
-    let totalMinutes = (endH * 60 + endM) - (startH * 60 + startM);
-
-    if (totalMinutes < 0) totalMinutes += 24 * 60; // Handle overnight
-
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
-
-    if (hours === 0) return `${minutes} min`;
-    if (minutes === 0) return `${hours} hr`;
-    return `${hours} hr ${minutes} min`;
-}
-
-/**
- * Debounce a function to limit how often it runs
- * @param {Function} func - The function to debounce
- * @param {number} wait - Wait time in milliseconds
- * @returns {Function} Debounced function
- */
-function debounce(func, wait) {
+function debounce(func, wait = 300) {
     let timeout;
-    return function (...args) {
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func.apply(this, args);
+        };
         clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(this, args), wait);
+        timeout = setTimeout(later, wait);
     };
 }
 
-// ========== DOM MANIPULATION HELPERS ==========
+/**
+ * Escape HTML special characters
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
 
 /**
- * Safely get an element by ID
- * @param {string} id - Element ID
- * @returns {HTMLElement|null}
+ * Show confirmation dialog
+ * @param {string} message
+ * @param {Function} callback
  */
+function confirmAction(message, callback) {
+    if (confirm(message)) {
+        callback();
+    }
+}
+
+/**
+ * Delete item with confirmation
+ * @param {string} url
+ * @param {string} itemName
+ */
+function deleteItem(url, itemName) {
+    confirmAction(`Are you sure you want to delete ${itemName}?`, () => {
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = url;
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+
+/**
+ * Initialize table search
+ * @param {string} searchInputId
+ * @param {string} tableId
+ */
+function initializeTableSearch(searchInputId, tableId) {
+    const searchInput = document.getElementById(searchInputId);
+    const table = document.getElementById(tableId);
+
+    if (!searchInput || !table) return;
+
+    searchInput.addEventListener('input', debounce(function (e) {
+        const query = e.target.value.toLowerCase();
+        const rows = table.querySelectorAll('tbody tr');
+
+        rows.forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(query) ? '' : 'none';
+        });
+    }, 200));
+}
+
+
+// ========== DOM MANIPULATION HELPERS ==========
+
 function getElement(id) {
     return document.getElementById(id);
 }
 
-/**
- * Safely get all elements matching a selector
- * @param {string} selector - CSS selector
- * @returns {NodeList}
- */
 function getElements(selector) {
     return document.querySelectorAll(selector);
 }
 
-/**
- * Add click event listener to element
- * @param {string} id - Element ID
- * @param {Function} handler - Click handler function
- */
 function onClick(id, handler) {
     const element = getElement(id);
     if (element) {
@@ -450,23 +488,14 @@ function onClick(id, handler) {
     }
 }
 
+
 // ========== FORM VALIDATION ==========
 
-/**
- * Validate an email address
- * @param {string} email - Email to validate
- * @returns {boolean} True if valid
- */
 function isValidEmail(email) {
     const pattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return pattern.test(email);
 }
 
-/**
- * Validate password strength
- * @param {string} password - Password to check
- * @returns {object} Validation result with score and feedback
- */
 function validatePassword(password) {
     const result = {
         score: 0,
@@ -500,31 +529,15 @@ function validatePassword(password) {
     return result;
 }
 
-/**
- * Show validation error on a form field
- * @param {HTMLElement} field - The input field
- * @param {string} message - Error message
- */
 function showFieldError(field, message) {
-    // Remove any existing error
     clearFieldError(field);
-
-    // Add error class
     field.classList.add('is-invalid');
-
-    // Create error message element
     const errorDiv = document.createElement('div');
     errorDiv.className = 'invalid-feedback';
     errorDiv.textContent = message;
-
-    // Insert after the field
     field.parentNode.appendChild(errorDiv);
 }
 
-/**
- * Clear validation error from a form field
- * @param {HTMLElement} field - The input field
- */
 function clearFieldError(field) {
     field.classList.remove('is-invalid');
     const existingError = field.parentNode.querySelector('.invalid-feedback');
@@ -533,13 +546,9 @@ function clearFieldError(field) {
     }
 }
 
+
 // ========== LOCAL STORAGE HELPERS ==========
 
-/**
- * Save data to local storage
- * @param {string} key - Storage key
- * @param {any} data - Data to store
- */
 function saveToStorage(key, data) {
     try {
         localStorage.setItem(key, JSON.stringify(data));
@@ -548,11 +557,6 @@ function saveToStorage(key, data) {
     }
 }
 
-/**
- * Get data from local storage
- * @param {string} key - Storage key
- * @returns {any} Retrieved data or null
- */
 function getFromStorage(key) {
     try {
         const item = localStorage.getItem(key);
@@ -563,21 +567,13 @@ function getFromStorage(key) {
     }
 }
 
-/**
- * Remove data from local storage
- * @param {string} key - Storage key
- */
 function removeFromStorage(key) {
     localStorage.removeItem(key);
 }
 
+
 // ========== LOADING STATE MANAGEMENT ==========
 
-/**
- * Show loading spinner in a button
- * @param {HTMLElement} button - The button element
- * @param {string} loadingText - Text to show while loading
- */
 function showButtonLoading(button, loadingText = 'Loading...') {
     button.disabled = true;
     button.dataset.originalText = button.innerHTML;
@@ -587,18 +583,11 @@ function showButtonLoading(button, loadingText = 'Loading...') {
     `;
 }
 
-/**
- * Hide loading spinner and restore button
- * @param {HTMLElement} button - The button element
- */
 function hideButtonLoading(button) {
     button.disabled = false;
     button.innerHTML = button.dataset.originalText || button.innerHTML;
 }
 
-/**
- * Show page loading overlay
- */
 function showPageLoading() {
     let overlay = getElement('page-loading-overlay');
     if (!overlay) {
@@ -627,9 +616,6 @@ function showPageLoading() {
     overlay.style.display = 'flex';
 }
 
-/**
- * Hide page loading overlay
- */
 function hidePageLoading() {
     const overlay = getElement('page-loading-overlay');
     if (overlay) {
@@ -637,24 +623,27 @@ function hidePageLoading() {
     }
 }
 
-// ========== DOCUMENT READY ==========
-// This code runs when the page finishes loading
 
-document.addEventListener('DOMContentLoaded', function () {
-    console.log('Gap2Growth - Application Loaded');
-
-    // Add animation class styles
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-        @keyframes fadeOut {
-            from { opacity: 1; }
-            to { opacity: 0; }
-        }
-    `;
-    document.head.appendChild(style);
-});
->>>>>>> 8feacbf6adc2f63a8f778ae9cd2d236f7e181b12
+// ========== GLOBAL OBJECT EXPOSURE ==========
+window.gap2growth = {
+    api,
+    showToast,
+    formatTime,
+    formatDate,
+    formatDuration,
+    calculateDuration,
+    formatRelativeTime,
+    confirmAction,
+    deleteItem,
+    debounce,
+    startActivity,
+    completeActivity,
+    markNotificationRead,
+    markAllNotificationsRead,
+    showButtonLoading,
+    hideButtonLoading,
+    showPageLoading,
+    hidePageLoading,
+    isValidEmail,
+    validatePassword
+};
